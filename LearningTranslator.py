@@ -8,7 +8,7 @@ import unicodedata
 from tempfile import NamedTemporaryFile
 
 # DeepL API Key (replace with your actual key)
-DEEPL_API_KEY = '86dd78dd-1b69-451c-a701-773312d7bfc8:fx'
+DEEPL_API_KEY = ''
 DEEPL_URL = "https://api-free.deepl.com/v2/translate"
 
 def translate_text(text, target_language):
