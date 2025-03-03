@@ -6,46 +6,90 @@ import playsound
 import os
 import unicodedata
 from tempfile import NamedTemporaryFile
+from utility.config_manager import get_api_key
+import threading
+from functools import partial
 
-# DeepL API Key (replace with your actual key)
-DEEPL_API_KEY = ''
+# DeepL API Key
+DEEPL_API_KEY = get_api_key()
 DEEPL_URL = "https://api-free.deepl.com/v2/translate"
 
 def translate_text(text, target_language):
     """
     Translate text to the target language using the DeepL API.
     """
+    # Check if API key is set
+    if not DEEPL_API_KEY:
+        print("Error: DeepL API key is not configured.")
+        return f"[Translation Error: API key not configured. Please set your DeepL API key.]"
+    
     params = {
         'auth_key': DEEPL_API_KEY,
         'text': text,
         'target_lang': target_language
     }
-    response = requests.post(DEEPL_URL, data=params)
-    translation = response.json()['translations'][0]['text']
-    return translation
+    
+    try:
+        response = requests.post(DEEPL_URL, data=params, timeout=10)
+        
+        # Check if the request was successful
+        response.raise_for_status()
+        
+        # Try to parse the JSON response
+        try:
+            data = response.json()
+            if 'translations' in data and len(data['translations']) > 0:
+                return data['translations'][0]['text']
+            else:
+                print(f"Unexpected API response format: {data}")
+                return f"[Translation Error: Unexpected API response format]"
+        except requests.exceptions.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            print(f"Response content: {response.text}")
+            return f"[Translation Error: Invalid response from API]"
+            
+    except requests.exceptions.RequestException as e:
+        print(f"API request error: {e}")
+        return f"[Translation Error: Could not connect to translation service]"
 
 def capture_user_voice():
     """
     Capture the user's voice and return the text.
+    Improved to handle longer phrases better.
     """
     recognizer = sr.Recognizer()
     
-    # Adjust these settings for better recognition:
-    # - phrase_time_limit: Maximum number of seconds for a phrase (None means no limit)
-    # - pause_threshold: Seconds of non-speaking audio before a phrase is considered complete (default: 0.8)
-    pause_threshold = 2.0  # Increase this to allow longer pauses between words
+    # Adjust these parameters for better recognition of longer sentences
+    recognizer.pause_threshold = 3.0  # Longer pause threshold (seconds)
+    recognizer.phrase_threshold = 0.3  # Lower phrase threshold for better continuous recognition
+    recognizer.non_speaking_duration = 1.0  # Longer duration for non-speaking
     
     with sr.Microphone() as source:
         print("Please say something...")
-        recognizer.adjust_for_ambient_noise(source)
-        recognizer.pause_threshold = pause_threshold  # Set the pause threshold
+        # Adjust for ambient noise with longer duration
+        recognizer.adjust_for_ambient_noise(source, duration=1.0)
         print("Listening...")
-        audio = recognizer.listen(source, phrase_time_limit=None)
+        
+        try:
+            # Set a longer timeout to wait for speech to start
+            # Set a longer phrase_time_limit for longer phrases
+            audio = recognizer.listen(
+                source, 
+                timeout=10.0,  # Wait up to 10 seconds for speech to start
+                phrase_time_limit=10.0  # Allow phrases up to 10 seconds long
+            )
+        except sr.WaitTimeoutError:
+            print("No speech detected within timeout period")
+            return None
 
     try:
-        # Recognize speech using Google Speech Recognition
         print("Recognizing...")
-        user_text = recognizer.recognize_google(audio)
+        # Use a more robust recognition setting
+        user_text = recognizer.recognize_google(
+            audio, 
+            language="en-US",  # Explicitly set language
+            show_all=False     # Return best match
+        )
         print(f"You said: {user_text}")
         return user_text
     except sr.UnknownValueError:
@@ -58,34 +102,121 @@ def capture_user_voice():
 def play_audio(text, language):
     """
     Convert the text into speech and play it.
-    Uses a temporary file to avoid conflicts with previous plays.
+    Uses pygame as the primary audio player with proper resource management.
     """
+    import os
+    import tempfile
+    import time
+    
+    # Print debug info
+    print(f"Playing audio in language: {language}")
+    print(f"Text to speak: {text[:30]}{'...' if len(text) > 30 else ''}")
+    
+    temp_filename = None
+    
     try:
-        # Create a temporary file with a unique name
-        with NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
-            temp_filename = temp_file.name
+        # Create a temporary file with a valid filename
+        temp_dir = tempfile.gettempdir()
+        temp_filename = os.path.join(temp_dir, f"speech_{int(time.time())}.mp3")
+        print(f"Creating temp file: {temp_filename}")
         
-        # Generate the speech and save to the temporary file
+        # Generate the speech
         tts = gTTS(text=text, lang=language)
         tts.save(temp_filename)
         
-        # Add a small delay to ensure the file is properly written
+        # Wait for file to be ready
         time.sleep(0.5)
+        print("Audio file created successfully")
         
-        # Play the audio
-        playsound.playsound(temp_filename)
-        
-        # Add a small delay before cleanup
-        time.sleep(0.5)
-    except Exception as e:
-        print(f"Error playing audio: {e}")
-    finally:
-        # Clean up the temporary file if it exists
+        # Use pygame as the primary audio player
         try:
-            if os.path.exists(temp_filename):
+            import pygame
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            
+            print("Loading audio with pygame...")
+            pygame.mixer.music.load(temp_filename)
+            pygame.mixer.music.play()
+            
+            print("Playing audio...")
+            # Wait for playback to finish with a timeout
+            start_time = time.time()
+            timeout = 30  # Maximum wait time in seconds
+            
+            while pygame.mixer.music.get_busy() and (time.time() - start_time < timeout):
+                pygame.time.Clock().tick(10)  # Limit the loop to 10 times per second
+            
+            # Make sure we stop playback if we're exiting the loop due to timeout
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+                print("Audio playback timed out")
+            else:
+                print("Audio playback completed")
+            
+        except Exception as pygame_error:
+            print(f"Pygame error: {pygame_error}")
+            # Fallback to playsound with non-blocking mode
+            try:
+                print("Falling back to playsound...")
+                playsound.playsound(temp_filename, False)  # Non-blocking
+                # Give it time to play
+                time.sleep(5)  # Adjust based on typical audio length
+            except Exception as playsound_error:
+                print(f"Playsound error: {playsound_error}")
+                print("All audio playback methods failed")
+            
+    except Exception as e:
+        print(f"Error in play_audio: {e}")
+    finally:
+        # Clean up with a delay to ensure file is no longer in use
+        if temp_filename and os.path.exists(temp_filename):
+            try:
+                print(f"Attempting to remove temp file: {temp_filename}")
+                # Wait a moment before deleting
+                time.sleep(2.0)
                 os.remove(temp_filename)
-        except Exception as e:
-            print(f"Error cleaning up audio file: {e}")
+                print("Temp file removed successfully")
+            except Exception as e:
+                print(f"Error removing temporary file: {e}")
+                # Schedule removal for later in a separate thread
+                def delayed_remove():
+                    try:
+                        time.sleep(5)
+                        if os.path.exists(temp_filename):
+                            os.remove(temp_filename)
+                            print("Temp file removed with delay")
+                    except Exception as delayed_error:
+                        print(f"Failed to remove temp file with delay: {delayed_error}")
+                
+                threading.Thread(target=delayed_remove).start()
+
+def normalize_text(text):
+    """
+    Normalize text by removing accents and converting to lowercase
+    for better comparison.
+    """
+    if text is None:
+        return None
+    # Convert to lowercase and normalize accents
+    normalized = unicodedata.normalize('NFKD', text.lower())
+    # Remove accents
+    normalized = ''.join([c for c in normalized if not unicodedata.combining(c)])
+    return normalized
+
+def run_in_thread(callback=None):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            if callback:
+                def thread_target():
+                    result = func(*args, **kwargs)
+                    callback(result)
+                threading.Thread(target=thread_target).start()
+                return None
+            else:
+                threading.Thread(target=partial(func, *args, **kwargs)).start()
+                return None
+        return wrapper
+    return decorator
 
 def main():
     print("Welcome to the Language Learning App!")
@@ -124,15 +255,6 @@ def main():
             user_attempt = capture_user_voice()
             
             # Normalize text for comparison
-            def normalize_text(text):
-                if text is None:
-                    return None
-                # Convert to lowercase and normalize accents
-                normalized = unicodedata.normalize('NFKD', text.lower())
-                # Remove accents
-                normalized = ''.join([c for c in normalized if not unicodedata.combining(c)])
-                return normalized
-                
             normalized_attempt = normalize_text(user_attempt)
             normalized_translation = normalize_text(translated_sentence)
 
