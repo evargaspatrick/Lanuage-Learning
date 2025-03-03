@@ -55,31 +55,33 @@ def translate_text(text, target_language):
 def capture_user_voice():
     """
     Capture the user's voice and return the text.
-    Improved to handle longer phrases better.
+    Uses dynamic silence detection to determine when the user has finished speaking.
     """
     recognizer = sr.Recognizer()
     
-    # Adjust these parameters for better recognition of longer sentences
-    recognizer.pause_threshold = 3.0  # Longer pause threshold (seconds)
-    recognizer.phrase_threshold = 0.3  # Lower phrase threshold for better continuous recognition
-    recognizer.non_speaking_duration = 1.0  # Longer duration for non-speaking
+    # Configure parameters for better natural speech recognition
+    recognizer.pause_threshold = 2.0       # Time of silence needed to consider speech complete (2 seconds)
+    recognizer.phrase_threshold = 0.3      # Lower threshold for continuous speech recognition
+    recognizer.non_speaking_duration = 1.0 # Time without speech to be considered a pause (not end)
+    recognizer.dynamic_energy_threshold = True # Automatically adjust for ambient noise
     
     with sr.Microphone() as source:
         print("Please say something...")
-        # Adjust for ambient noise with longer duration
+        # Adjust for ambient noise with longer duration for better accuracy
         recognizer.adjust_for_ambient_noise(source, duration=1.0)
         print("Listening...")
         
         try:
-            # Set a longer timeout to wait for speech to start
-            # Set a longer phrase_time_limit for longer phrases
+            # Listen without a specific time limit
+            # The pause_threshold parameter (2.0) now controls when to finish listening
             audio = recognizer.listen(
-                source, 
-                timeout=10.0,  # Wait up to 10 seconds for speech to start
-                phrase_time_limit=10.0  # Allow phrases up to 10 seconds long
+                source,
+                timeout=None,  # No timeout for waiting to start speech
+                phrase_time_limit=None  # No hard limit on phrase length
             )
+            print("Finished listening")
         except sr.WaitTimeoutError:
-            print("No speech detected within timeout period")
+            print("No speech detected")
             return None
 
     try:
@@ -87,8 +89,8 @@ def capture_user_voice():
         # Use a more robust recognition setting
         user_text = recognizer.recognize_google(
             audio, 
-            language="en-US",  # Explicitly set language
-            show_all=False     # Return best match
+            language="en-US",  # Explicitly set language for better accuracy
+            show_all=False     # Return best match only
         )
         print(f"You said: {user_text}")
         return user_text
