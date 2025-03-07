@@ -2,6 +2,7 @@ import customtkinter as ctk
 from utility.config_manager import load_config, save_config
 from UI.dashboard_frame import DashboardFrame
 from UI.practice_frame import PracticeFrame
+from UI.enunciation_frame import EnunciationFrame  # Add this import
 
 class LanguageLearningApp(ctk.CTk):
     def __init__(self):
@@ -24,6 +25,7 @@ class LanguageLearningApp(ctk.CTk):
         # Initialize frames
         self.dashboard = DashboardFrame(self, self.show_practice, self.current_language)
         self.practice = PracticeFrame(self, self.current_language)
+        self.enunciation = EnunciationFrame(self, self.current_language)  # Add this line
         
         # Configure grid layout
         self.grid_columnconfigure(1, weight=1)
@@ -69,6 +71,15 @@ class LanguageLearningApp(ctk.CTk):
         )
         self.practice_button.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
         
+        # Add the Enunciation Practice button
+        self.enunciation_button = ctk.CTkButton(
+            self.sidebar_frame, text="Enunciation Practice", 
+            command=self.show_enunciation, fg_color="transparent", 
+            text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+            anchor="w"
+        )
+        self.enunciation_button.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+        
         # Language selection
         self.language_label = ctk.CTkLabel(
             self.sidebar_frame, text="Language:", 
@@ -109,13 +120,20 @@ class LanguageLearningApp(ctk.CTk):
         self.update_sidebar_buttons()
         self.practice.create_frame(self.main_frame)
     
+    # Add this method for the new page
+    def show_enunciation(self):
+        self.clear_main_frame()
+        self.current_page = "enunciation"
+        self.update_sidebar_buttons()
+        self.enunciation.create_frame(self.main_frame)
+    
     def clear_main_frame(self):
         for widget in self.main_frame.winfo_children():
             widget.destroy()
     
     def update_sidebar_buttons(self):
-        buttons = [self.dashboard_button, self.practice_button]
-        pages = ["dashboard", "practice"]
+        buttons = [self.dashboard_button, self.practice_button, self.enunciation_button]
+        pages = ["dashboard", "practice", "enunciation"]
         
         for button, page in zip(buttons, pages):
             if page == self.current_page:
@@ -127,6 +145,8 @@ class LanguageLearningApp(ctk.CTk):
         self.current_language.set(new_language)
         if self.current_page == "practice":
             self.show_practice()
+        elif self.current_page == "enunciation":
+            self.show_enunciation()
     
     def change_appearance_mode(self, new_appearance_mode):
         ctk.set_appearance_mode(new_appearance_mode)
